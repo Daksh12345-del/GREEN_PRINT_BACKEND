@@ -1,0 +1,68 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # A real, ephemeral Postgres instance for this CI run only — the same
+    # engine Supabase runs, so passing here means the code will behave the
+    # same way against your real Supabase project.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: greenprint_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:testpass@localhost:5432/greenprint_ci
+      JWT_SECRET: ci-test-secret-not-for-production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run test suite
+        run: npm test
+
+      - name: Sanity-check the server actually boots
+        run: |
+          npm start &
+          npx --yes wait-on http://localhost:3000/api/health --timeout 30000
+          curl -sf http://localhost:3000/api/health | grep '"ok":true'
+          kill %1
+
+  # Deployment itself is handled by Render's own GitHub integration (it
+  # auto-deploys on every push to main once connected — see
+  # DEPLOY-RENDER.md). This job is a placeholder if you'd rather trigger
+  # deploys explicitly from CI instead of Render's push-to-deploy.
+  # deploy:
+  #   needs: test
+  #   runs-on: ubuntu-latest
+  #   if: github.ref == 'refs/heads/main'
+  #   steps:
+  #     - name: Trigger Render deploy hook
+  #       run: curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"

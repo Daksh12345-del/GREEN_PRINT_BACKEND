@@ -6,12 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-<<<<<<< HEAD
     "test": "node --test --test-concurrency=1",
     "smoke-test": "node scripts/smokeTest.js"
-=======
-    "test": "node --test --test-concurrency=1"
->>>>>>> 43ab3d04c7b8b03d30a410e28916179c08f95a9f
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

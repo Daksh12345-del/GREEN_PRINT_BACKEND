@@ -13,6 +13,8 @@ regular `npm install`.
 | File | What it verifies |
 |---|---|
 | `tests/auth.test.js` | Registration, login, duplicate-email rejection, `/me` |
+| `tests/password-reset.test.js` | Forgot-password never leaks whether an email exists, tokens expire after 15 min, are single-use, and a real reset actually changes the login-able password |
+| `tests/rate-limiting.test.js` | Login is blocked with 429 after repeated attempts (brute-force protection), forgot-password is blocked after repeated requests (anti-spam), and rate limiting is scoped only to the endpoints that need it |
 | `tests/roles.test.js` | Role-based access control — company_admin can't self-escalate to super_admin, one company can't see another's data, only super_admin manages emission factors |
 | `tests/emissions.test.js` | **The core differentiator** — region-specific factors produce different, exact numbers (India vs UK electricity), multi-pollutant output (NOx/SOx), GLOBAL fallback for unseeded regions |
 | `tests/kpis.test.js` | Dashboard rollup math across multiple mixed-activity logs |

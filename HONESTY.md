@@ -33,6 +33,29 @@ the `emission_factors` Postgres table, seeded from:
 A super_admin can add new regions or edit any factor from the Emission
 Factors page — no code change required.
 
+**Automated production smoke test.** `.github/workflows/smoke-test.yml`
+actually hits the real deployed URL every 30 minutes — not a mock, not a
+localhost check. Verified both directions: ran it against a real running
+server (all checks pass) and against a stopped one (correctly fails with
+exit code 1, so CI would show it red). GitHub emails you automatically if
+a scheduled run fails.
+
+**Rate limiting.** Login, registration, and forgot-password are all
+protected against brute-force/spam — 10 login attempts per 15 minutes,
+10 signups per hour, 5 password-reset requests per 15 minutes, all
+tracked per IP address. Verified by actually exhausting each limit in
+the test suite and confirming the exact request that should be blocked
+gets a 429, and that a different, unrelated endpoint is never affected.
+
+**Password reset.** `POST /api/auth/forgot-password` + `/reset-password` is
+a real, working flow — a random token is generated, hashed with SHA-256
+before storage (never the raw token), expires after 15 minutes, and can
+only be used once. The endpoint gives the exact same response whether or
+not the email exists, so it can't be used to check who has an account.
+Sends real email via Resend when `RESEND_API_KEY` is set; without it, the
+reset link is printed to the server console instead — verified end-to-end
+(request → console link → reset → login with the new password all work).
+
 **IoT ingestion.** `POST /api/ingest/logs`, authenticated by a real API
 key (SHA-256 hashed, never stored in plaintext), is a genuine endpoint a
 real sensor or telematics device could call today. Verified: created a

@@ -154,6 +154,18 @@ CREATE TABLE IF NOT EXISTS carbon_baselines (
   set_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Forgot-password flow. We store a HASH of the reset token, never the
+-- token itself — same principle as password_hash. A token is only valid
+-- until expires_at and can only be used once (used_at gets set).
+CREATE TABLE IF NOT EXISTS password_resets (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TIMESTAMPTZ NOT NULL,
+  used_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 `;
 
 async function migrate() {
@@ -386,7 +398,8 @@ async function seedDemoData() {
 async function resetForTests() {
   await pool.query(`
     TRUNCATE companies, users, facilities, vehicles, logs, devices,
-             emission_factors, ai_insights_cache, platform_settings, carbon_baselines
+             emission_factors, ai_insights_cache, platform_settings, carbon_baselines,
+             password_resets
     RESTART IDENTITY CASCADE
   `);
   await seedEmissionFactors();

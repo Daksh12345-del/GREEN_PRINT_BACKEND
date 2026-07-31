@@ -25,6 +25,7 @@ const carbonCreditsRoutes = require("./src/routes/carbonCredits");
 const reportsRoutes = require("./src/routes/reports");
 
 const app = express();
+app.set("trust proxy", 1);
 const PORT = process.env.PORT || 3000;
 
 // In production (Render), set ALLOWED_ORIGIN to your Vercel frontend's URL

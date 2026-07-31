@@ -21,6 +21,8 @@ the setup steps below) and serves a frontend hosted separately (e.g. Vercel
    - `JWT_SECRET` — a long random string (`render.yaml` can auto-generate one)
    - `ALLOWED_ORIGIN` — your Vercel frontend's URL, e.g. `https://greenprint.vercel.app`
    - `GROQ_API_KEY` — optional, for live AI recommendations
+   - `APP_URL` — your Vercel frontend URL, e.g. `https://greenprint.vercel.app` (used to build password-reset email links)
+   - `RESEND_API_KEY` — optional, for real password-reset emails (see "Password reset emails" below)
    - `GROQ_MODEL` — optional, defaults to `openai/gpt-oss-120b`
 5. Deploy. First boot will log:
    ```
@@ -50,11 +52,47 @@ Free web services on Render spin down after inactivity and take ~30-50
 seconds to wake up on the next request. That's fine for a demo/pilot; if
 this needs to feel instant for real users, upgrade to a paid instance type.
 
+## Password reset emails
+
+"Forgot password" works immediately with zero setup — without `RESEND_API_KEY`,
+the reset link is printed to Render's **Logs** tab instead of emailed. Fine
+for testing, but before real users rely on this:
+
+1. Sign up at **https://resend.com** (free tier, no card needed)
+2. Get an API key at **https://resend.com/api-keys**
+3. Add `RESEND_API_KEY` to Render's environment variables
+4. Optionally set `RESEND_FROM_EMAIL` once you've verified your own domain
+   in Resend's dashboard — until then, the default `onboarding@resend.dev`
+   works but only for testing (Resend restricts who it can send to on
+   that shared address)
+
 ## CORS
 
 `ALLOWED_ORIGIN` controls which frontend domain is allowed to call this
 API (see `server.js`). Leaving it unset defaults to `*` (any origin) —
 fine for quick testing, but set it to your real Vercel URL once you have one.
+
+## Automated smoke test (catches "deployed but actually broken")
+
+`.github/workflows/smoke-test.yml` runs `scripts/smokeTest.js` against
+your **real** deployed URL every 30 minutes (and any time you click "Run
+workflow" in the Actions tab). It checks things unit tests running
+locally can't: the live database is actually reachable, auth middleware
+didn't get misconfigured on deploy, CORS is set up for your real
+frontend, etc.
+
+**One-time setup:**
+1. Repo → **Settings → Secrets and variables → Actions → New repository secret**
+2. Add `BACKEND_URL` = your real Render URL (e.g. `https://green-print-backend.onrender.com`), no trailing slash
+3. Optionally add `FRONTEND_URL` too, to enable the CORS check
+
+GitHub automatically emails the repo owner if a scheduled workflow run
+fails — that's your alert, nothing extra to configure.
+
+Run it locally any time with:
+```bash
+BACKEND_URL=https://green-print-backend.onrender.com npm run smoke-test
+```
 
 ## Local development
 

@@ -1,7 +1,7 @@
 const express = require("express");
 const { query } = require("../lib/db");
 const { requireAuth, resolveCompanyId } = require("../lib/auth");
-const { loadFactorMap, computeKPIs } = require("../lib/emissions");
+const { computeKPIs } = require("../lib/emissions");
 const { generateRecommendations } = require("../lib/aiEngine");
 
 const router = express.Router();
@@ -40,7 +40,7 @@ router.get("/insights", async (req, res) => {
     const facilities = (await query("SELECT * FROM facilities WHERE company_id = $1", [companyId])).rows;
     const vehicles = (await query("SELECT * FROM vehicles WHERE company_id = $1", [companyId])).rows;
 
-    const kpis = computeKPIs(logs, company.region, await loadFactorMap());
+    const kpis = computeKPIs(logs);
     const result = await generateRecommendations({ company, kpis, recentLogs, facilities, vehicles });
 
     await query(

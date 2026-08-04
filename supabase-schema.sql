@@ -75,7 +75,11 @@ CREATE TABLE IF NOT EXISTS logs (
   recorded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
   source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'device')),
   device_id INTEGER,
-  timestamp TIMESTAMPTZ NOT NULL DEFAULT now()
+  timestamp TIMESTAMPTZ NOT NULL DEFAULT now(),
+  co2e_kg REAL,
+  nox_kg REAL,
+  sox_kg REAL,
+  factors_snapshot JSONB
 );
 
 CREATE TABLE IF NOT EXISTS devices (

@@ -33,6 +33,45 @@ the `emission_factors` Postgres table, seeded from:
 A super_admin can add new regions or edit any factor from the Emission
 Factors page — no code change required.
 
+**Historical factor versioning.** Every log's emissions are computed once,
+at write time, against that day's emission factors, and permanently
+stored on the row (`co2e_kg`/`nox_kg`/`sox_kg`/`factors_snapshot`). Every
+read afterwards (dashboard, AI insights, PDF, CSV) uses that stored value
+— never a fresh recomputation. Verified directly: logged an activity,
+changed the underlying factor to a wildly different number, confirmed the
+original log's number didn't move, and confirmed a brand-new log picked
+up the changed factor. Pre-existing logs from before this feature shipped
+are backfilled once, automatically, on server startup, using the best
+available (current) factors — documented as a stated tradeoff since there's
+no record of what factor was truly in effect when they were first logged.
+
+**CSV / Excel export.** `GET /api/reports/logs.csv` streams every logged
+activity with its stored (historically accurate) emissions — verified to
+be valid, parseable CSV that opens correctly, with the same numbers as
+the PDF report (both read from the same stored snapshot).
+
+**Month-over-month alerts.** `GET /api/kpis/trend` compares this
+calendar month's CO2e to last month's using each log's real timestamp,
+and the Dashboard shows a banner when the increase crosses 20%. Verified
+by inserting logs at controlled past/present timestamps and confirming
+the exact percentage and alert flag. This is **in-app only** right now —
+turning it into an actual email requires a scheduler (see `ROADMAP.md`
+for the concrete path using a GitHub Actions cron, same pattern as the
+smoke test).
+
+**Dark mode.** A real toggle, not just a CSS filter — separate token
+values for every color variable the app uses, switched via a
+`data-theme` attribute, persisted in `localStorage`, and defaults to the
+visitor's OS-level preference on first visit.
+
+**Hindi/English toggle — partial, honestly scoped.** Login, signup, the
+full navigation sidebar, and the Dashboard's labels are genuinely
+bilingual. Other pages (Facilities, Fleet, Team, Emission Factors, etc.)
+are still English-only — see `ROADMAP.md`'s "Multi-language coverage"
+section for exactly what's covered and how to extend it. A missing
+translation key silently falls back to English rather than breaking the
+page.
+
 **Automated production smoke test.** `.github/workflows/smoke-test.yml`
 actually hits the real deployed URL every 30 minutes — not a mock, not a
 localhost check. Verified both directions: ran it against a real running
@@ -83,9 +122,17 @@ itself only comes from an accredited auditor**, not from any software.
 
 **NOx/SOx factors.** Unlike CO2e (which is fairly consistent for a given
 fuel), NOx and SOx vary a lot by engine/boiler technology. The seeded
-values are published indicative averages (EPA AP-42), clearly labeled as
-such — real regulatory filings normally use site-specific stack-test
-results instead.
+values (diesel, coal, and now natural gas — EPA AP-42, cross-validated
+against a second independent source) are published indicative averages,
+clearly labeled as such — real regulatory filings normally use
+site-specific stack-test results instead. **Deliberately not seeded**:
+petrol/LPG vehicle NOx & SOx (published figures vary up to 150x by
+vehicle age/Euro emissions standard — a single average would be actively
+misleading, not just imprecise) and grid electricity NOx/SOx (standard
+GHG accounting frameworks track these at the power-plant/national level,
+not per kWh consumed — inventing a per-kWh figure wouldn't match how any
+real framework reports it). See `src/lib/db.js`'s seed comments for the
+full reasoning on each.
 
 **Green Score / ESG score.** A documented, transparent formula (see
 `server/src/lib/emissions.js`) that rewards renewable share and penalizes

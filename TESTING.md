@@ -15,6 +15,8 @@ regular `npm install`.
 | `tests/auth.test.js` | Registration, login, duplicate-email rejection, `/me` |
 | `tests/password-reset.test.js` | Forgot-password never leaks whether an email exists, tokens expire after 15 min, are single-use, and a real reset actually changes the login-able password |
 | `tests/rate-limiting.test.js` | Login is blocked with 429 after repeated attempts (brute-force protection), forgot-password is blocked after repeated requests (anti-spam), and rate limiting is scoped only to the endpoints that need it |
+| `tests/factor-versioning.test.js` | **The core proof for historical accuracy** — logs an activity, changes the underlying factor to a very different value, confirms the original log's number didn't move, and confirms a brand-new log picks up the changed factor |
+| `tests/trend.test.js` | Month-over-month CO2e comparison math, using controlled timestamps, and that the 20% alert threshold fires correctly |
 | `tests/roles.test.js` | Role-based access control — company_admin can't self-escalate to super_admin, one company can't see another's data, only super_admin manages emission factors |
 | `tests/emissions.test.js` | **The core differentiator** — region-specific factors produce different, exact numbers (India vs UK electricity), multi-pollutant output (NOx/SOx), GLOBAL fallback for unseeded regions |
 | `tests/kpis.test.js` | Dashboard rollup math across multiple mixed-activity logs |

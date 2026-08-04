@@ -93,8 +93,11 @@ CREATE TABLE IF NOT EXISTS emission_factors (
 );
 
 -- Activity-based logs: what was actually consumed, not a pre-computed number.
--- Emissions are computed by looking up emission_factors for the company's
--- region + activity_type at read time — see src/lib/emissions.js.
+-- Emissions are computed ONCE, at write time, from that moment's emission
+-- factors, and PERMANENTLY STORED in co2e_kg/nox_kg/sox_kg/factors_snapshot.
+-- This is deliberate: if a government body republishes an updated factor
+-- next year, historical logs must keep showing the number that was true
+-- when they were recorded, not silently change — see src/lib/emissions.js.
 CREATE TABLE IF NOT EXISTS logs (
   id SERIAL PRIMARY KEY,
   company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
@@ -109,7 +112,11 @@ CREATE TABLE IF NOT EXISTS logs (
   recorded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
   source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'device')),
   device_id INTEGER,
-  timestamp TIMESTAMPTZ NOT NULL DEFAULT now()
+  timestamp TIMESTAMPTZ NOT NULL DEFAULT now(),
+  co2e_kg REAL,
+  nox_kg REAL,
+  sox_kg REAL,
+  factors_snapshot JSONB
 );
 
 -- IoT / telematics devices that can push activity data directly via API
@@ -186,6 +193,10 @@ async function migrate() {
     ALTER TABLE logs ADD COLUMN IF NOT EXISTS unit TEXT NOT NULL DEFAULT 'kWh';
     ALTER TABLE logs ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual';
     ALTER TABLE logs ADD COLUMN IF NOT EXISTS device_id INTEGER;
+    ALTER TABLE logs ADD COLUMN IF NOT EXISTS co2e_kg REAL;
+    ALTER TABLE logs ADD COLUMN IF NOT EXISTS nox_kg REAL;
+    ALTER TABLE logs ADD COLUMN IF NOT EXISTS sox_kg REAL;
+    ALTER TABLE logs ADD COLUMN IF NOT EXISTS factors_snapshot JSONB;
   `);
 }
 
@@ -281,8 +292,42 @@ const EMISSION_FACTOR_SEED = [
     region: "GLOBAL", activity_type: "coal", pollutant: "SOx", factor_value: 19.0, unit: "kg",
     source: "US EPA AP-42 Ch.1, indicative average (uncontrolled, ~1-2% sulfur coal)",
     notes: "Recompute from actual coal sulfur content where known — SOx is roughly proportional to it."
+  },
+  {
+    // 100 lb NOx / 10^6 scf (uncontrolled, <100 MMBtu/hr boiler) from
+    // EPA AP-42 Table 1.4-1, converted via natural gas's ~1,020 Btu/scf
+    // heating value: 100 lb / 1,020 MMBtu = 0.098 lb/MMBtu, cross-checked
+    // against Illinois' regulatory uncontrolled-boiler figure of
+    // 0.084 lb/MMBtu (same ballpark) — then converted lb/MMBtu → kg/kWh.
+    region: "GLOBAL", activity_type: "natural_gas", pollutant: "NOx", factor_value: 0.000152, unit: "kWh",
+    source: "US EPA AP-42 Section 1.4, Table 1.4-1 (uncontrolled industrial boiler, <100 MMBtu/hr)",
+    notes: "Cross-validated against Illinois EPA's regulatory uncontrolled-boiler NOx limit for natural gas (35 Ill. Adm. Code 217.164). Large/tangential-fired boilers run higher — see AP-42 §1.4 directly if that's your equipment."
   }
 ];
+
+// Deliberately NOT seeded, and why (documented here instead of silently
+// missing, per the "no fake precision" principle — see ROADMAP.md):
+//
+// - Petrol/LPG vehicle NOx & SOx: published figures (EEA/EMEP Guidebook)
+//   range from 0.015 to 2.5 g/km depending on Euro emissions standard and
+//   vehicle age — a 150x spread. A single "average" per litre would be
+//   actively misleading, not just imprecise, and there's no standard
+//   per-litre (as opposed to per-km, which needs a fuel-economy
+//   assumption to convert) fuel-based factor authoritative enough to
+//   seed here with confidence. Real deployments need vehicle-specific
+//   telematics or a stated fleet emissions-standard assumption.
+// - Natural gas / LPG SOx: both fuels have near-zero sulfur content by
+//   design (natural gas is desulfurized before distribution; the only
+//   sulfur compound present is a trace odorant added for leak
+//   detection). The EPA AP-42 SOx figure for natural gas is ~0.0000009
+//   kg/kWh — small enough that presenting it as a clean "factor" implies
+//   more precision than the underlying trace-additive chemistry supports.
+// - Grid electricity NOx/SOx: standard corporate GHG accounting
+//   (GHG Protocol, CDP, BRSR) treats electricity as CO2e-only via
+//   location-based grid factors — NOx/SOx from power generation are
+//   tracked at the facility/national level by the utility, not
+//   conventionally allocated per kWh consumed. Inventing a per-kWh
+//   figure here would not match how any real framework reports it.
 
 async function seedEmissionFactors() {
   const { rows } = await pool.query("SELECT COUNT(*)::int AS count FROM emission_factors");

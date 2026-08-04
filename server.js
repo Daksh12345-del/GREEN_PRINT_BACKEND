@@ -10,6 +10,7 @@ const cors = require("cors");
 const path = require("path");
 
 const db = require("./src/lib/db");
+const { backfillMissingSnapshots } = require("./src/lib/emissions");
 const authRoutes = require("./src/routes/auth");
 const companiesRoutes = require("./src/routes/companies");
 const facilitiesRoutes = require("./src/routes/facilities");
@@ -80,6 +81,7 @@ app.get("*", (req, res) => {
 async function start() {
   console.log("Connecting to Supabase Postgres and running schema migration…");
   await db.init();
+  await backfillMissingSnapshots();
 
   app.listen(PORT, () => {
     console.log(`Green Print server running on http://localhost:${PORT}`);

@@ -2,7 +2,7 @@ const express = require("express");
 const PDFDocument = require("pdfkit");
 const { query } = require("../lib/db");
 const { requireAuth, resolveCompanyId } = require("../lib/auth");
-const { loadFactorMap, computeLogEmissions, computeKPIs } = require("../lib/emissions");
+const { computeKPIs, readSnapshot } = require("../lib/emissions");
 
 const router = express.Router();
 router.use(requireAuth);
@@ -139,14 +139,13 @@ router.get("/esg.pdf", async (req, res) => {
     const logs = (
       await query("SELECT * FROM logs WHERE company_id = $1 ORDER BY timestamp ASC", [companyId])
     ).rows;
-    const factorMap = await loadFactorMap();
-    const kpis = computeKPIs(logs, company.region, factorMap);
+    const kpis = computeKPIs(logs);
 
     const sourcesUsed = new Map();
     let scope1Co2e = 0, scope2Co2e = 0, totalNox = 0, totalSox = 0;
 
     for (const log of logs) {
-      const e = computeLogEmissions(log, company.region, factorMap);
+      const e = readSnapshot(log);
       if (FUEL_TYPES.includes(log.activity_type)) scope1Co2e += e.CO2e || 0;
       if (log.activity_type === "electricity") scope2Co2e += e.CO2e || 0;
       totalNox += e.NOx || 0;
@@ -264,7 +263,7 @@ router.get("/esg.pdf", async (req, res) => {
         drawTableHeader();
       }
       const y = doc.y;
-      const e = computeLogEmissions(log, company.region, factorMap);
+      const e = readSnapshot(log);
       const scope = FUEL_TYPES.includes(log.activity_type) ? "Scope 1" : "Scope 2";
       if (i % 2 === 0) doc.rect(MARGIN, y, tableW, rowH).fill(COLOR.bg);
       doc.fontSize(8.5).font("Helvetica").fillColor(COLOR.ink);
@@ -287,8 +286,10 @@ router.get("/esg.pdf", async (req, res) => {
     doc.moveDown(1);
     sectionHeading(doc, "Emission factor sources");
     doc.fontSize(9.5).font("Helvetica").fillColor(COLOR.inkSoft).text(
-      "Every figure in this report is Activity Quantity × Emission Factor. The factors used for " +
-      `${company.name}'s region (${company.region}) were:`,
+      "Every figure in this report is Activity Quantity × Emission Factor. Each entry below shows the " +
+      "factor that was in effect on the day it was logged — if an entry was recorded last year, it keeps " +
+      "last year's factor even if that number has since been updated, so historical figures never silently " +
+      `change. The factors used for ${company.name}'s entries were:`,
       { width: PAGE_W - MARGIN * 2, lineGap: 2 }
     );
     doc.moveDown(0.8);
@@ -329,6 +330,87 @@ router.get("/esg.pdf", async (req, res) => {
     console.error(err);
     if (!res.headersSent) {
       res.status(500).json({ error: "Something went wrong generating the report" });
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// CSV export — every logged activity + its stored (historically accurate)
+// emissions breakdown, for opening directly in Excel/Google Sheets/etc.
+// Uses the same stored snapshot as everything else — never recomputes
+// against current factors, so this export matches the PDF report exactly.
+// ---------------------------------------------------------------------------
+
+function csvEscape(value) {
+  const str = String(value ?? "");
+  if (/[",\n]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
+  return str;
+}
+
+function toCsvRow(values) {
+  return values.map(csvEscape).join(",") + "\r\n";
+}
+
+router.get("/logs.csv", async (req, res) => {
+  try {
+    const companyId = resolveCompanyId(req);
+    if (!companyId) {
+      return res.status(400).json({ error: "companyId is required (super_admin: pass ?companyId=)" });
+    }
+
+    const company = (await query("SELECT * FROM companies WHERE id = $1", [companyId])).rows[0];
+    if (!company) return res.status(404).json({ error: "Company not found" });
+
+    const logs = (
+      await query(
+        `SELECT l.*, f.name AS facility_name, v.name AS vehicle_name
+         FROM logs l
+         LEFT JOIN facilities f ON f.id = l.facility_id
+         LEFT JOIN vehicles v ON v.id = l.vehicle_id
+         WHERE l.company_id = $1
+         ORDER BY l.timestamp ASC`,
+        [companyId]
+      )
+    ).rows;
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="greenprint-logs-${company.name.replace(/\s+/g, "-")}.csv"`
+    );
+
+    res.write(
+      toCsvRow([
+        "Date", "Activity Type", "Quantity", "Unit", "Facility", "Vehicle",
+        "Renewable Share (%)", "CO2e (kg)", "NOx (kg)", "SOx (kg)", "Source", "Logged By (user id)"
+      ])
+    );
+
+    for (const log of logs) {
+      const e = readSnapshot(log);
+      res.write(
+        toCsvRow([
+          new Date(log.timestamp).toISOString(),
+          log.activity_type,
+          log.quantity,
+          log.unit,
+          log.facility_name || "",
+          log.vehicle_name || "",
+          log.renewable_share,
+          e.CO2e ?? "",
+          e.NOx ?? "",
+          e.SOx ?? "",
+          log.source,
+          log.recorded_by ?? ""
+        ])
+      );
+    }
+
+    res.end();
+  } catch (err) {
+    console.error(err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Something went wrong generating the CSV export" });
     }
   }
 });

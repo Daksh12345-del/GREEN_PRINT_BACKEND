@@ -1,7 +1,7 @@
 const express = require("express");
 const { query } = require("../lib/db");
 const { requireAuth, resolveCompanyId } = require("../lib/auth");
-const { loadFactorMap, computeLogEmissions } = require("../lib/emissions");
+const { loadFactorMap, computeLogEmissions, snapshotForStorage, readSnapshot } = require("../lib/emissions");
 
 const router = express.Router();
 router.use(requireAuth);
@@ -24,10 +24,18 @@ async function getCompanyRegion(companyId) {
   return rows[0]?.region || "GLOBAL";
 }
 
+function withEmissions(row) {
+  return { ...row, emissions: readSnapshot(row) };
+}
+
 router.get("/activity-types", (req, res) => {
   res.json(ACTIVITY_UNITS);
 });
 
+// Reads NEVER touch emission_factors or recompute anything — every log's
+// emissions were calculated once, at write time, and are permanently
+// stored on the row (co2e_kg/nox_kg/sox_kg/factors_snapshot). This is
+// what makes historical numbers immune to future factor updates.
 router.get("/", async (req, res) => {
   try {
     const companyId = resolveCompanyId(req);
@@ -35,17 +43,7 @@ router.get("/", async (req, res) => {
       ? await query("SELECT * FROM logs WHERE company_id = $1 ORDER BY timestamp ASC", [companyId])
       : await query("SELECT * FROM logs ORDER BY timestamp ASC");
 
-    const factorMap = await loadFactorMap();
-    const regionCache = {};
-
-    const enriched = [];
-    for (const row of result.rows) {
-      regionCache[row.company_id] ??= await getCompanyRegion(row.company_id);
-      const emissions = computeLogEmissions(row, regionCache[row.company_id], factorMap);
-      enriched.push({ ...row, emissions });
-    }
-
-    res.json(enriched);
+    res.json(result.rows.map(withEmissions));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong loading logs" });
@@ -66,27 +64,44 @@ router.post("/", async (req, res) => {
     }
 
     const unit = ACTIVITY_UNITS[activityType];
+    const quantityNum = Number(quantity) || 0;
+    const renewableShareNum = Number(renewableShare) || 0;
+
+    // Compute emissions ONCE, right now, against today's factors — then
+    // store the result permanently. This log will show this exact number
+    // forever, even if the underlying factor changes later.
+    const region = await getCompanyRegion(companyId);
+    const factorMap = await loadFactorMap();
+    const emissions = computeLogEmissions(
+      { activity_type: activityType, quantity: quantityNum },
+      region,
+      factorMap
+    );
+    const snap = snapshotForStorage(emissions);
 
     const result = await query(
-      `INSERT INTO logs (company_id, facility_id, vehicle_id, activity_type, quantity, unit, renewable_share, recorded_by, source)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'manual') RETURNING *`,
+      `INSERT INTO logs (
+         company_id, facility_id, vehicle_id, activity_type, quantity, unit,
+         renewable_share, recorded_by, source, co2e_kg, nox_kg, sox_kg, factors_snapshot
+       )
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'manual',$9,$10,$11,$12) RETURNING *`,
       [
         companyId,
         facilityId || null,
         vehicleId || null,
         activityType,
-        Number(quantity) || 0,
+        quantityNum,
         unit,
-        Number(renewableShare) || 0,
-        req.user.id
+        renewableShareNum,
+        req.user.id,
+        snap.co2eKg,
+        snap.noxKg,
+        snap.soxKg,
+        snap.factorsSnapshot
       ]
     );
 
-    const region = await getCompanyRegion(companyId);
-    const factorMap = await loadFactorMap();
-    const emissions = computeLogEmissions(result.rows[0], region, factorMap);
-
-    res.status(201).json({ ...result.rows[0], emissions });
+    res.status(201).json(withEmissions(result.rows[0]));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong saving the log" });

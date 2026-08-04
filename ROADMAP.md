@@ -21,16 +21,31 @@ tracks what's built vs. what's next.
 | AI Recommendation Engine | ✅ Live via Groq API, transparent rule-based fallback |
 | Team management | ✅ Role-based invites |
 | Self-serve signup | ✅ With region selection |
+| Password reset | ✅ Real email via Resend, 15-min single-use tokens |
+| Rate limiting | ✅ Login/signup/forgot-password brute-force & spam protection |
+| Production smoke tests | ✅ Automated, runs every 30 min against the real deployed URL |
+| Historical factor versioning | ✅ Emissions snapshotted permanently at write time — updating a factor never changes past logs |
+| Natural gas NOx | ✅ Real EPA AP-42 factor added, cross-validated against a second source |
+| CSV export | ✅ Every log + its historically-accurate emissions, opens directly in Excel/Sheets |
+| Month-over-month alerts | ✅ In-app banner when this month's CO2e is 20%+ above last month's |
+| Dark mode | ✅ Full theme toggle, persisted, respects system preference on first visit |
+| Hindi/English toggle | ✅ Login, signup, navigation, and dashboard fully bilingual — see "Multi-language coverage" below |
+
+## Multi-language coverage (honest scope)
+
+The Hindi/English toggle (client/src/translations.js) currently covers:
+login, registration, the entire nav sidebar, and the Dashboard page's
+labels. It does **not** yet cover every string on every page (Facilities,
+Fleet, Team, Emission Factors, etc. are still English-only). This is a
+deliberate scope choice — the highest-traffic screens are fully bilingual,
+and any translation key missing from a language silently falls back to
+English (see `LanguageContext.jsx`'s `t()` function) rather than breaking,
+so extending coverage to more pages is a safe, incremental task: add more
+keys to `translations.js` and swap in `t("key")` calls page by page.
 
 ## What's next, in priority order
 
 ### Phase 1 — Strengthen what exists
-- **Historical factor versioning.** Right now emissions are computed
-  against the *current* factor table on every read. If a government
-  updates a factor next year, this year's report would silently change.
-  Fix: snapshot the factor used at log-entry time (the API already returns
-  `factorsUsed` per log — persisting that alongside the log is the next
-  step).
 - **More regions.** Only 6 regions + GLOBAL are seeded. Adding more (Japan,
   Australia, Brazil, etc.) is just data entry via the Emission Factors
   page — no code change needed, but someone needs to research and cite
@@ -38,6 +53,18 @@ tracks what's built vs. what's next.
 - **Site-specific NOx/SOx overrides per facility**, since these genuinely
   vary by equipment — right now they're one indicative number per
   region/fuel, not per facility.
+- **Petrol/LPG vehicle NOx & SOx** — deliberately left unseeded (see
+  `HONESTY.md`) because published figures vary up to 150x by vehicle
+  age/Euro standard; a real fleet would need to state its own assumption
+  or plug in telematics-based per-vehicle data instead of one average.
+- **Email alerts, not just in-app.** `GET /api/kpis/trend` already
+  computes the month-over-month comparison and flags when it crosses the
+  alert threshold — the Dashboard shows it as a banner. Turning that into
+  an actual email requires a scheduler (there's no cron inside the Node
+  app itself); the cleanest option is a GitHub Actions workflow on a
+  monthly `schedule:` trigger — same pattern as `smoke-test.yml` — that
+  calls the trend endpoint for each company and emails via Resend
+  (`src/lib/email.js` already has the sending logic) when `isAlert` is true.
 
 ### Phase 2 — Deeper integrations
 - **Provider-specific IoT connectors.** The generic `/api/ingest/logs`

@@ -107,6 +107,41 @@ correctly rejected with 401.
 a methodology page listing every factor and its source. Verified by
 generating and visually inspecting a real report.
 
+**Interactive charts.** `GET /api/kpis/timeseries` (monthly/yearly,
+Scope 1 vs Scope 2) and `GET /api/kpis/by-facility` (per-facility CO2e
+share) are both built from each log's stored emissions snapshot — never
+a fresh recomputation, same rule as everywhere else. Verified end-to-end:
+logged real activity against a live server, confirmed the returned
+numbers match `quantity × emission factor` exactly, and confirmed the
+facility grouping (including the "Unassigned / Fleet" bucket for logs
+with no facility) sums to the same total as the KPI endpoint. 9 new
+automated tests, all passing against a real Postgres database.
+
+**Sector benchmarking.** `GET /api/kpis/benchmark` compares your Green
+Score, renewable share, and average CO2e/log against other companies in
+your sector — anonymized: it refuses to return an average (`available:
+false`) until at least 3 *other* companies in your sector have logged
+activity, so the "average" can never be reverse-engineered into one or
+two competitors' real numbers. Individual peer companies are never named
+or identified anywhere in the response — verified by a test that greps
+the raw JSON for peer company names. Deliberately benchmarks on
+size-independent metrics (Green Score, renewable %), not raw total CO2e,
+since this app doesn't collect production volume/revenue to normalize a
+tonnage comparison fairly across company sizes — a documented tradeoff,
+not an oversight. 5 new automated tests, all passing, plus a live curl
+run confirming the exact "2 peers = locked, 3 peers = unlocked" behavior.
+
+**Onboarding wizard.** A Dashboard checklist (facility/vehicle → first
+log → explore insights) computed entirely from real data — whether a
+step shows as done is read from actual facilities/vehicles/logs that
+exist, never from a separate "onboarding complete" flag that could drift
+out of sync with reality. Auto-hides once every applicable step is done,
+or if dismissed (remembered per-user in `localStorage`, same pattern as
+dark mode/language). Role-aware: a fleet_manager is guided to add a
+vehicle, a company_admin/plant_manager to add a facility, and a role with
+neither permission (employee, auditor) skips straight to logging an
+activity, since `facilityId`/`vehicleId` are optional on a log.
+
 ## ⚠️ Real math, but simplified / not certified
 
 **"Formatted to align with GHG Protocol Scope 1/2."** The report groups
